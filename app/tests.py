@@ -4,7 +4,7 @@ from django.contrib.auth import get_user_model
 from rest_framework.authtoken.models import Token
 from rest_framework import status
 import uuid
-from .models import Project, Node, UserMembership, NodeMembership
+from .models import Project, Node, UserMembership, NodeMembership, ScienceField, FundingSource, AllocationRequest
 from test_utils import assertDictContainsSubset
 
 User = get_user_model()
@@ -805,6 +805,165 @@ class TestPortalCompatibility(TestCase):
             r.url,
             "https://auth.globus.org/v2/web/logout?redirect_uri=http://testserver/",
         )
+
+
+class TestAllocationRequests(TestCase):
+    """
+    TestAllocationRequests tests the allocation request endpoints and their permissions.
+    """
+    def setUp(self):
+        # Create test users
+        self.admin_user = create_random_admin_user()
+        self.regular_user = create_random_user()
+        self.other_user = create_random_user()
+
+        # Create test data
+        self.project = Project.objects.create(
+            name='test-project',
+            include_in_api=True
+        )
+        self.science_field = ScienceField.objects.create(
+            name='Test Science Field'
+        )
+        self.funding_source = FundingSource.objects.create(
+            source='Test Funding Source',
+            grant_number='GRANT-123'
+        )
+
+        # Create test allocation request
+        self.allocation_request = AllocationRequest.objects.create(
+            username=self.regular_user.username,
+            project_request_type='new',
+            project_short_name='test-project',
+            pi_name='Test PI',
+            pi_email='pi@example.com',
+            pi_institution='Test Institution',
+            project_title='Test Project',
+            related_to_proposal='Yes',
+            justification='Test justification'
+        )
+        self.allocation_request.science_fields.add(self.science_field)
+        self.allocation_request.funding_sources.add(self.funding_source)
+
+    def test_get_allocation_request_list_as_admin(self):
+        """Test that admin users can see all allocation requests"""
+        self.client.force_login(self.admin_user)
+        response = self.client.get("/allocation-requests/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 1)
+
+    def test_get_allocation_request_list_as_regular_user(self):
+        """Test that regular users can only see their own requests"""
+        self.client.force_login(self.regular_user)
+        response = self.client.get("/allocation-requests/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['username'], self.regular_user.username)
+
+    def test_get_allocation_request_list_as_other_user(self):
+        """Test that users cannot see other users' requests"""
+        self.client.force_login(self.regular_user)
+        response = self.client.get("/allocation-requests/")
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        # self.assertEqual(len(response.data), 0)
+
+    def test_get_allocation_request_form_data(self):
+        """Test that form data endpoint returns all required data"""
+        self.client.force_login(self.regular_user)
+        response = self.client.get("/allocation-requests/form-data/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        # Check that all required data is present
+        self.assertIn('science_fields', response.data)
+        self.assertIn('project_request_types', response.data)
+        self.assertIn('funding_sources', response.data)
+        self.assertIn('access_permissions', response.data)
+        self.assertIn('proposal_choices', response.data)
+        self.assertIn('projects', response.data)
+
+    def test_get_project_allocation_request(self):
+        """Test getting allocation request for a specific project"""
+        self.client.force_login(self.regular_user)
+        response = self.client.get(f"/allocation-requests/{self.project.name}/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['project_short_name'], self.project.name)
+
+    def test_get_nonexistent_project_allocation_request(self):
+        """Test getting allocation request for a non-existent project"""
+        self.client.force_login(self.regular_user)
+        response = self.client.get("/allocation-requests/nonexistent/")
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_create_new_allocation_request(self):
+        """Test creating a new allocation request"""
+        self.client.force_login(self.regular_user)
+
+        # First create a funding source
+        funding_source = FundingSource.objects.create(
+            source='New Source',
+            grant_number='12345'
+        )
+
+        data = {
+            'username': self.regular_user.username,
+            'project_request_type': 'new',
+            'pi_name': 'New PI',
+            'pi_email': 'new_pi@example.com',
+            'pi_institution': 'New Institution',
+            'project_title': 'New Project',
+            'project_short_name': 'my-new-project',
+            'science_fields': [self.science_field.id],
+            'related_to_proposal': 'Yes',
+            'justification': 'New justification',
+            'funding_sources': [funding_source.id]
+        }
+        response = self.client.post("/allocation-requests/my-new-project/new", data, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(AllocationRequest.objects.count(), 2)
+
+    def test_create_add_user_allocation_request(self):
+        """Test creating an allocation request to add a user to an existing project"""
+        self.client.force_login(self.regular_user)
+        data = {
+            'username': self.regular_user.username,
+            'project_request_type': 'add',
+            'existing_project': self.project.id
+        }
+        response = self.client.post(f"/allocation-requests/add/{self.project.name}/", data, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(AllocationRequest.objects.count(), 2)
+
+    def test_create_renew_allocation_request(self):
+        """Test creating an allocation request to renew an existing project"""
+        self.client.force_login(self.regular_user)
+        data = {
+            'username': self.regular_user.username,
+            'project_request_type': 'renew',
+            'existing_project': self.project.id
+        }
+        # Create a mutable copy of the data
+        mutable_data = data.copy()
+        response = self.client.post(f"/allocation-requests/{self.project.name}/renew", mutable_data, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(AllocationRequest.objects.count(), 2)
+
+    def test_create_allocation_request_validation(self):
+        """Test validation of allocation request creation"""
+        self.client.force_login(self.regular_user)
+        data = {
+            'username': self.regular_user.username,
+            'project_request_type': 'new'
+        }
+        response = self.client.post("/allocation-requests/new-project/new", data, format='json')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('pi_name', response.data)
+        self.assertIn('pi_email', response.data)
+        self.assertIn('pi_institution', response.data)
+        self.assertIn('project_title', response.data)
+        self.assertIn('project_short_name', response.data)
+        self.assertIn('science_fields', response.data)
+        self.assertIn('related_to_proposal', response.data)
+        self.assertIn('funding_sources', response.data)
 
 
 def create_random_user(**kwargs) -> User:

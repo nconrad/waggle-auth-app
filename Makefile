@@ -38,7 +38,7 @@ loaddata:
 	@rm ./$(DATA_FILENAME)
 
 test:
-	@docker-compose -f $(DOCKER_COMPOSE_FILE) exec django python manage.py test
+	@docker-compose -f $(DOCKER_COMPOSE_FILE) exec django pytest
 	@docker-compose -f $(DOCKER_COMPOSE_FILE) exec django python manage.py check --deploy
 
 up:

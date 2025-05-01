@@ -45,6 +45,16 @@ urlpatterns = [
             views.UserAccessView.as_view(),
             name="user-access",
         ),
+        # project views,
+        path("projects/", views.ProjectListView.as_view(), name="project-list"),
+        path("projects/<str:name>/", views.ProjectDetailView.as_view(), name="project-detail"),
+        # allocation request views
+        path("allocation-requests/", views.AllocationRequestListView.as_view(), name="allocation-request-list"),
+        path("allocation-requests/form-data/", views.AllocationRequestFormDataView.as_view(), name="allocation-request-form-data"),
+        path("allocation-requests/<str:project_short_name>", views.ProjectAllocationDetailView.as_view(), name="project-allocation-details"),
+        path("allocation-requests/<str:project_short_name>/new", views.NewAllocationRequestView.as_view(), name="new-allocation"),
+        path("allocation-requests/<str:project_short_name>/add-user", views.AddUserAllocationRequestView.as_view(), name="add-user-allocation"),
+        path("allocation-requests/<str:project_short_name>/renew", views.RenewAllocationRequestView.as_view(), name="renew-allocation"),
         # keeping old profiles/ path for now. replaced by users/.
         path(
             "profiles/<str:username>/access",

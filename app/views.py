@@ -19,11 +19,12 @@ from rest_framework.authtoken.models import Token
 from django.contrib.auth import views as auth_views
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django_slack import slack_message
-from .serializers import UserSerializer, UserProfileSerializer
+from .serializers import UserSerializer, UserProfileSerializer, ProjectSerializer, AllocationRequestSerializer, AllocationRequestFormDataSerializer
 from .forms import UpdateSSHPublicKeysForm, CompleteLoginForm
 from .permissions import IsSelf, IsMatchingUsername
-from .models import Node
+from .models import Node, Project, AllocationRequest, ScienceField, FundingSource
 import re
+from rest_framework import status
 
 User = get_user_model()
 
@@ -66,6 +67,143 @@ class UserProfileView(RetrieveUpdateAPIView):
     serializer_class = UserProfileSerializer
     lookup_field = "username"
     permission_classes = [IsAdminUser | IsSelf]
+
+
+class ProjectListView(ListAPIView):
+    permission_classes = [IsAdminUser | IsSelf]
+    queryset = Project.objects.filter(include_in_api=True)  # Only return projects with checkbox checked
+    serializer_class = ProjectSerializer
+
+
+class ProjectDetailView(RetrieveAPIView):
+    permission_classes = [IsAdminUser | IsSelf]
+    queryset = Project.objects.all()
+    serializer_class = ProjectSerializer
+    lookup_field = "name"
+
+
+class AllocationRequestListView(ListAPIView):
+    """List all allocation requests"""
+    permission_classes = [IsAdminUser]
+    queryset = AllocationRequest.objects.all()
+    serializer_class = AllocationRequestSerializer
+
+    # def get_queryset(self):
+    #     """
+    #     Filter queryset based on user permissions:
+    #     - Admin users can see all requests
+    #     - Regular users can only see their own requests
+    #     """
+    #     user = self.request.user
+    #     if user.is_staff:
+    #         return AllocationRequest.objects.all()
+    #     return AllocationRequest.objects.filter(username=user.username)
+
+
+class ProjectAllocationDetailView(APIView):
+    permission_classes = [IsAdminUser | IsSelf]
+
+    def get(self, request, project_short_name):
+        """Get allocation request information for a project"""
+        allocation_request = AllocationRequest.objects.filter(
+            project_short_name=project_short_name
+        ).first()
+
+        if not allocation_request:
+            return Response(
+                {"detail": "No allocation request found for this project"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        serializer = AllocationRequestSerializer(allocation_request)
+        return Response(serializer.data)
+
+
+class NewAllocationRequestView(APIView):
+    permission_classes = [IsAdminUser | IsSelf]
+
+    def post(self, request, project_short_name):
+        """Create a new allocation request for a new project"""
+        # Create a mutable copy of the data
+        data = request.data.copy()
+        # data['project_request_type'] = 'new'
+        serializer = AllocationRequestSerializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+class AddUserAllocationRequestView(APIView):
+    permission_classes = [IsAdminUser | IsSelf]
+
+    def post(self, request, project_short_name):
+        """Create an allocation request to add a user to an existing project"""
+        project = get_object_or_404(Project, name=project_short_name)
+        # Create a mutable copy of the data
+        data = request.data.copy()
+        data['project_request_type'] = 'add'
+        data['existing_project'] = project.id
+        serializer = AllocationRequestSerializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+class RenewAllocationRequestView(APIView):
+    permission_classes = [IsAdminUser | IsSelf]
+
+    def post(self, request, project_short_name):
+        """Create an allocation request to renew an existing project"""
+        project = get_object_or_404(Project, name=project_short_name)
+        # Create a mutable copy of the data
+        data = request.data.copy()
+        data['project_request_type'] = 'renew'
+        data['existing_project'] = project.id
+        serializer = AllocationRequestSerializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+class AllocationRequestFormDataView(APIView):
+    permission_classes = [IsAdminUser | IsSelf]
+
+    def get(self, request):
+        """Get all data needed to fill out the allocation request form"""
+        # Get all science fields
+        science_fields = list(ScienceField.objects.values_list('name', flat=True))
+
+        # Get project request types from model choices
+        project_request_types = [choice[0] for choice in AllocationRequest.PROJECT_REQUEST_TYPE_CHOICES]
+
+        # Get all funding sources
+        funding_sources = list(FundingSource.objects.values_list('source', flat=True))
+
+        # Define access permissions
+        access_permissions = [
+            'access_running_apps',
+            'access_shell',
+            'access_download'
+        ]
+
+        # Get proposal choices from model
+        proposal_choices = [choice[0] for choice in AllocationRequest.PROPOSAL_CHOICES]
+
+        # Get all projects that are included in the API
+        projects = Project.objects.filter(include_in_api=True)
+
+        data = {
+            'projects': projects,
+            'project_request_types': project_request_types,
+            'science_fields': science_fields,
+            'funding_sources': funding_sources,
+            'access_permissions': access_permissions,
+            'proposal_choices': proposal_choices,
+        }
+
+        serializer = AllocationRequestFormDataSerializer(data)
+        return Response(serializer.data)
+
 
 
 class TokenView(APIView):

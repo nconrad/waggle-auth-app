@@ -69,6 +69,7 @@ def create_auth_token(sender, instance=None, created=False, **kwargs):
 # Eventually, we should clarify the name or how this is done.
 class Project(models.Model):
     name = models.CharField(max_length=255, unique=True)
+    include_in_api = models.BooleanField(default=True)  # should the project be included in the api
     users = models.ManyToManyField(User, through="UserMembership")
     nodes = models.ManyToManyField(Node, through="NodeMembership")
 
@@ -80,6 +81,7 @@ class Project(models.Model):
 
     def number_of_nodes(self):
         return self.nodes.count()
+
 
 
 class UserMembership(models.Model):
@@ -133,3 +135,81 @@ class NodeMembership(models.Model):
     #     constraints = [
     #         models.UniqueConstraint("node", "project", name="app_nodemembership_uniq")
     #     ]
+
+
+
+class FundingSource(models.Model):
+    source = models.CharField(max_length=255)
+    grant_number = models.CharField(max_length=255)
+
+
+class ScienceField(models.Model):
+    name = models.CharField(max_length=50, unique=True)
+
+    def __str__(self):
+        return self.name
+
+    class Meta:
+        ordering = ['name']
+
+
+class AllocationRequest(models.Model):
+    PROJECT_REQUEST_TYPE_CHOICES = [
+        ('new', 'Request new project'),
+        ('renew', 'Renew existing project'),
+        ('add', 'Request add to existing project'),
+    ]
+
+    project_request_type = models.CharField(
+        max_length=10,
+        choices=PROJECT_REQUEST_TYPE_CHOICES,
+        default='new',
+        verbose_name="Project Request Type"
+    )
+
+    existing_project = models.ForeignKey(Project, on_delete=models.SET_NULL, null=True, blank=True)
+    username = models.CharField(max_length=255, unique=True)
+
+    # Fields moved from AllocationProject
+    pi_name = models.CharField(max_length=255, null=True, blank=True)
+    pi_email = models.EmailField(null=True, blank=True)
+    pi_institution = models.CharField(max_length=255, null=True, blank=True)
+    project_title = models.CharField(max_length=255, null=True, blank=True)
+    project_website = models.URLField(blank=True, null=True)
+    project_short_name = models.CharField(max_length=100, null=True, blank=True)
+    science_fields = models.ManyToManyField(ScienceField)
+
+    PROPOSAL_CHOICES = [
+        ('Yes', 'Yes'),
+        ('No', 'No'),
+    ]
+    related_to_proposal = models.CharField(max_length=10, choices=PROPOSAL_CHOICES, null=True, blank=True)
+    justification = models.TextField(blank=True, null=True)
+
+    funding_sources = models.ManyToManyField(FundingSource)
+
+    access_running_apps = models.BooleanField(default=False)
+    access_shell = models.BooleanField(default=False)
+    access_download = models.BooleanField(default=False)
+
+    interest_in_hpc = models.BooleanField(
+        verbose_name="Are you interested in using HPC resources with Sage data?",
+        default=False
+    )
+
+    comments = models.TextField(
+        verbose_name="Additional Comments",
+        blank=True,
+        null=True,
+        help_text="Any additional comments or information you'd like to provide"
+    )
+
+    is_approved = models.BooleanField(
+        "Approval status",
+        default=False,
+        help_text="Has the project been approved?"
+    )
+
+
+
+
